@@ -37,32 +37,49 @@ const PORT = process.env.PORT || 3000;
 initDb().then(() => {
   // 🔥 ADICIONADO '0.0.0.0': Informa ao Express para escutar toda a rede local
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Servidor rodando localmente em http://localhost:${PORT}`);
-    console.log('\n📋 Rotas disponíveis:');
-    console.log('  POST   /auth/register              → Registrar membro');
-    console.log('  POST   /auth/register-librarian    → Registrar bibliotecário (auth requerida)');
-    console.log('  POST   /auth/login                 → Login');
-    console.log('  GET    /auth/me                    → Dados do usuário logado');
-    console.log('  ─────────────────────────────────────────────────────');
-    console.log('  GET    /books                      → Listar livros');
-    console.log('  GET    /books/:id                  → Detalhe do livro');
-    console.log('  POST   /books                      → Cadastrar livro [lib]');
-    console.log('  PUT    /books/:id                  → Editar livro [lib]');
-    console.log('  DELETE /books/:id                  → Remover livro [lib]');
-    console.log('  ─────────────────────────────────────────────────────');
-    console.log('  GET    /loans                      → Listar empréstimos');
-    console.log('  GET    /loans/overdue              → Empréstimos vencidos [lib]');
-    console.log('  GET    /loans/:id                  → Detalhe do empréstimo');
-    console.log('  POST   /loans                      → Criar empréstimo [lib]');
-    console.log('  PATCH  /loans/:id/return           → Registrar devolução [lib]');
-    console.log('  PATCH  /loans/:id/approve          → Aprovar reserva pendente [lib]');
-    console.log('  PATCH  /loans/:id/reject          → Recusar pedido de empréstimo [lib]');
-    console.log('  ─────────────────────────────────────────────────────');
-    console.log('  GET    /users                      → Listar usuários [lib]');
-    console.log('  GET    /users/:id                  → Detalhe do usuário');
-    console.log('  GET    /users/:id/loans            → Histórico de empréstimos');
-    console.log('  PUT    /users/:id                  → Atualizar usuário');
-    console.log('  DELETE /users/:id                  → Remover usuário [lib]');
+    const reset = '\x1b[0m';
+    const bold = '\x1b[1m';
+    const cyan = '\x1b[36m';
+    const green = '\x1b[32m';
+    const blue = '\x1b[34m';
+    const yellow = '\x1b[33m';
+    const red = '\x1b[31m';
+    const gray = '\x1b[90m';
+
+    console.log(`\n${cyan}┌────────────────────────────────────────────────────────────────────────┐${reset}`);
+    console.log(`${cyan}│${reset}  🚀  ${bold}Library API${reset} rodando com sucesso em: ${cyan}http://localhost:${PORT.toString().padEnd(16)}${reset}${cyan}│${reset}`);
+    console.log(`${cyan}└────────────────────────────────────────────────────────────────────────┘${reset}`);
+    console.log(`   📋 ${bold}ROTAS DISPONÍVEIS NA API:${reset}`);
+    
+    console.log(`\n   ${bold}${cyan}[Autenticação]${reset}`);
+    console.log(`   ├── ${green}POST${reset}   /auth/register              ${gray}→ Registrar membro${reset}`);
+    console.log(`   ├── ${green}POST${reset}   /auth/register-librarian    ${gray}→ Registrar bibliotecário [auth]${reset}`);
+    console.log(`   ├── ${green}POST${reset}   /auth/login                 ${gray}→ Login${reset}`);
+    console.log(`   └── ${blue}GET${reset}    /auth/me                    ${gray}→ Dados do usuário logado${reset}`);
+
+    console.log(`\n   ${bold}${cyan}[Livros]${reset}`);
+    console.log(`   ├── ${blue}GET${reset}    /books                      ${gray}→ Listar livros${reset}`);
+    console.log(`   ├── ${blue}GET${reset}    /books/:id                  ${gray}→ Detalhe do livro${reset}`);
+    console.log(`   ├── ${green}POST${reset}   /books                      ${gray}→ Cadastrar livro [lib]${reset}`);
+    console.log(`   ├── ${yellow}PUT${reset}    /books/:id                  ${gray}→ Editar livro [lib]${reset}`);
+    console.log(`   └── ${red}DELETE${reset} /books/:id                  ${gray}→ Remover livro [lib]${reset}`);
+
+    console.log(`\n   ${bold}${cyan}[Empréstimos]${reset}`);
+    console.log(`   ├── ${blue}GET${reset}    /loans                      ${gray}→ Listar empréstimos${reset}`);
+    console.log(`   ├── ${blue}GET${reset}    /loans/overdue              ${gray}→ Empréstimos vencidos [lib]${reset}`);
+    console.log(`   ├── ${blue}GET${reset}    /loans/:id                  ${gray}→ Detalhe do empréstimo${reset}`);
+    console.log(`   ├── ${green}POST${reset}   /loans                      ${gray}→ Criar empréstimo [lib]${reset}`);
+    console.log(`   ├── ${red}PATCH${reset}  /loans/:id/return           ${gray}→ Registrar devolução [lib]${reset}`);
+    console.log(`   ├── ${red}PATCH${reset}  /loans/:id/approve          ${gray}→ Aprovar reserva pendente [lib]${reset}`);
+    console.log(`   └── ${red}PATCH${reset}  /loans/:id/reject           ${gray}→ Recusar pedido de empréstimo [lib]${reset}`);
+
+    console.log(`\n   ${bold}${cyan}[Usuários]${reset}`);
+    console.log(`   ├── ${blue}GET${reset}    /users                      ${gray}→ Listar usuários [lib]${reset}`);
+    console.log(`   ├── ${blue}GET${reset}    /users/:id                  ${gray}→ Detalhe do usuário${reset}`);
+    console.log(`   ├── ${blue}GET${reset}    /users/:id/loans            ${gray}→ Histórico de empréstimos${reset}`);
+    console.log(`   ├── ${yellow}PUT${reset}    /users/:id                  ${gray}→ Atualizar usuário${reset}`);
+    console.log(`   └── ${red}DELETE${reset} /users/:id                  ${gray}→ Remover usuário [lib]${reset}`);
+    console.log(`\n${cyan}───────────────────────────────────────────────────────────────────────────${reset}\n`);
     
   });
 });

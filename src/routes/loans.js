@@ -1,4 +1,3 @@
-
 const router = require('express').Router();
 const ctrl   = require('../controllers/loanController');
 const { authenticate, authorize } = require('../middleware/auth');

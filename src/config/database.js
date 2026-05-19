@@ -26,7 +26,9 @@ function query(sql, params = []) {
 function run(sql, params = []) {
   const stmt = db.prepare(sql);
 
-  stmt.run(params);
+  // CORREÇÃO AQUI: Vincula os parâmetros corretamente antes de rodar
+  stmt.bind(params); 
+  stmt.run();
 
   const result = {
     lastInsertRowid: db.exec(

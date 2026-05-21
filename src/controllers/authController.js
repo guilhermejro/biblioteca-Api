@@ -76,21 +76,16 @@ async function login(req, res) {
   try {
     const { email, password } = req.body;
     
-    // 🚨 COLOQUE ESTE BLOCO DE BYPASS AQUI (LOGO NO INÍCIO) 🚨
+    // 🚨 BLOCO DE BYPASS DO ADMIN 🚨
     if (email === 'admin@gmail.com' && password === '123456') {
       console.log("⚠️ TESTE: Forçando login do Admin via Bypass...");
       
-      // Gera o hash usando exatamente a biblioteca ativa no controller
       const hashNativo = await bcrypt.hash('123456', 10);
-      
-      // Sobrescreve o registro na memória do sql.js
       db.run("UPDATE users SET password = ? WHERE email = 'admin@gmail.com'", [hashNativo]);
-      db.saveDb(); // Salva no arquivo físico correto
+      db.saveDb();
       
-      // Busca o usuário atualizado
       const user = db.get('SELECT * FROM users WHERE email = ?', [email]);
       
-      // Gera o token JWT para destravar o seu frontend imediatamente
       const token = jwt.sign(
         { id: user.id, name: user.name, email: user.email, role: user.role },
         process.env.JWT_SECRET || 'secret',
@@ -105,15 +100,42 @@ async function login(req, res) {
     }
     // 🚨 FIM DO BLOCO DE BYPASS 🚨
 
+    // 1. Validação de campos obrigatórios
     if (!email || !password) {
       return res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
     }
+
+    // 2. Busca o usuário no banco (Método síncrono do sql.js, sem await)
+    const user = db.get('SELECT * FROM users WHERE email = ?', [email]);
+    if (!user) {
+      return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
+    }
+
+    // 3. Compara a senha digitada com o hash do banco (O bcrypt.compare é assíncrono, precisa de await)
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
+    }
+
+    // 4. Se a senha bater, gera o Token JWT para o usuário comum
+    const token = jwt.sign(
+      { id: user.id, name: user.name, email: user.email, role: user.role },
+      process.env.JWT_SECRET || 'secret',
+      { expiresIn: '8h' }
+    );
+
+    // 5. Retorna a resposta de sucesso (Isso vai destravar o Axios!)
+    return res.json({
+      message: 'Login realizado com sucesso!',
+      token,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role }
+    });
+
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Erro interno ao fazer login.' });
   }
 }
-
 // ── GET /auth/me ──────────────────────────────────────────────────────────────
 function me(req, res) {
   try {

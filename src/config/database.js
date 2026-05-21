@@ -16,7 +16,21 @@ function saveDb() {
 function query(sql, params = []) {
   const stmt   = db.prepare(sql);
   const rows   = [];
-  stmt.bind(params);
+  
+  // 🔥 CORREÇÃO: Converte strings numéricas em números reais antes do bind
+  // Isso impede que o sql.js quebre as cláusulas LIMIT e OFFSET
+  const sanitizedParams = params.map(param => {
+    if (typeof param === 'string' && !isNaN(param) && trim(param) !== '') {
+      return Number(param);
+    }
+    return param;
+  });
+
+  // Função auxiliar simples para limpar espaços caso use string antiga
+  function trim(str) { return str.replace(/^\s+|\s+$/g, ''); }
+
+  stmt.bind(sanitizedParams); // Usa os parâmetros higienizados
+  
   while (stmt.step()) rows.push(stmt.getAsObject());
   stmt.free();
   return rows;
@@ -69,6 +83,8 @@ function createTables() {
       isbn          TEXT    UNIQUE,
       publisher     TEXT,
       year          INTEGER,
+      description   TEXT, 
+      image_url     TEXT,
       total_copies  INTEGER NOT NULL DEFAULT 1,
       available     INTEGER NOT NULL DEFAULT 1,
       created_at    TEXT    NOT NULL DEFAULT (datetime('now'))

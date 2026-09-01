@@ -47,7 +47,7 @@ initDb().then(() => {
     const gray = '\x1b[90m';
 
     console.log(`\n${cyan}┌────────────────────────────────────────────────────────────────────────┐${reset}`);
-    console.log(`${cyan}│${reset}  🚀  ${bold}Library API${reset} rodando com sucesso em: ${cyan}http://localhost:${PORT.toString().padEnd(16)}${reset}${cyan}│${reset}`);
+    console.log(`${cyan}│${reset} ${bold}Library API${reset} rodando com sucesso em: ${cyan}http://localhost:${PORT.toString().padEnd(16)}${reset}${cyan}│${reset}`);
     console.log(`${cyan}└────────────────────────────────────────────────────────────────────────┘${reset}`);
     console.log(`   📋 ${bold}ROTAS DISPONÍVEIS NA API:${reset}`);
     

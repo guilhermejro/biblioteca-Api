@@ -1,13 +1,13 @@
 const Book = require('../models/Book');
 
 // ── GET /books ────────────────────────────────────────────────────────────────
-function listBooks(req, res) {
+async function listBooks(req, res) {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
     const search = req.query.search || '';
 
-    const result = Book.findAll({ page, limit, search });
+    const result = await Book.findAll({ page, limit, search });
 
     console.log(`[PAGINAÇÃO] Solicitada página: ${page} | Limite: ${limit} | Total de Livros no Banco: ${result.totalItems} | Páginas Totais calculadas: ${result.totalPages} | Livros retornados nesta página: ${result.books.length}`);
 
@@ -19,9 +19,9 @@ function listBooks(req, res) {
 }
 
 // ── GET /books/:id ────────────────────────────────────────────────────────────
-function getBook(req, res) {
+async function getBook(req, res) {
   try {
-    const book = Book.findById(req.params.id);
+    const book = await Book.findById(req.params.id);
     if (!book) return res.status(404).json({ error: 'Livro não encontrado.' });
     return res.json(book);
   } catch (error) {
@@ -31,7 +31,7 @@ function getBook(req, res) {
 }
 
 // ── POST /books  (somente bibliotecário) ─────────────────────────────────────
-function createBook(req, res) {
+async function createBook(req, res) {
   try {
     const { title, author, isbn, image_url } = req.body;
 
@@ -39,7 +39,7 @@ function createBook(req, res) {
       return res.status(400).json({ error: 'Título e autor são obrigatórios.' });
     }
 
-    if (isbn && Book.findByIsbn(isbn)) {
+    if (isbn && (await Book.findByIsbn(isbn))) {
       return res.status(409).json({ error: 'ISBN já cadastrado.' });
     }
     
@@ -47,7 +47,7 @@ function createBook(req, res) {
       return res.status(400).json({ error: 'O link da imagem deve ser uma URL válida.' });
     }
 
-    const book = Book.create(req.body);
+    const book = await Book.create(req.body);
     return res.status(201).json({ message: 'Livro cadastrado com sucesso.', book });
   } catch (error) {
     console.error("Erro no controller ao criar livro:", error);
@@ -56,9 +56,9 @@ function createBook(req, res) {
 }
 
 // ── PUT /books/:id  (somente bibliotecário) ───────────────────────────────────
-function updateBook(req, res) {
+async function updateBook(req, res) {
   try {
-    const book = Book.findById(req.params.id);
+    const book = await Book.findById(req.params.id);
     if (!book) return res.status(404).json({ error: 'Livro não encontrado.' });
 
     const { title, author, isbn, image_url, description, total_copies, available } = req.body;
@@ -67,18 +67,17 @@ function updateBook(req, res) {
       return res.status(400).json({ error: 'O link da imagem deve ser uma URL válida.' });
     }
 
-    // 🔥 CORREÇÃO: Usamos o operador "||" para manter o valor antigo caso o novo não seja enviado
     const updateData = {
       title: title || book.title,
       author: author || book.author,
       isbn: isbn !== undefined ? isbn : book.isbn,
       image_url: image_url === '' ? null : (image_url || book.image_url), 
-      description: description !== undefined ? description : book.description, // Cuidado se não houver essa coluna no banco!
+      description: description !== undefined ? description : book.description,
       total_copies: total_copies !== undefined ? Number(total_copies) : book.total_copies,
       available: available !== undefined ? Number(available) : book.available
     };
 
-    const updated = Book.update(req.params.id, updateData);
+    const updated = await Book.update(req.params.id, updateData);
     
     return res.json({ message: 'Livro atualizado com sucesso.', book: updated });
   } catch (error) {
@@ -88,16 +87,17 @@ function updateBook(req, res) {
 }
 
 // ── DELETE /books/:id  (somente bibliotecário) ────────────────────────────────
-function deleteBook(req, res) {
+async function deleteBook(req, res) {
   try {
-    const book = Book.findById(req.params.id);
+    const book = await Book.findById(req.params.id);
     if (!book) return res.status(404).json({ error: 'Livro não encontrado.' });
 
-    if (Book.hasActiveLoans(req.params.id)) {
+    const hasLoans = await Book.hasActiveLoans(req.params.id);
+    if (hasLoans) {
       return res.status(409).json({ error: 'Livro possui empréstimos ativos. Aguarde a devolução.' });
     }
 
-    Book.delete(req.params.id);
+    await Book.delete(req.params.id);
     return res.json({ message: 'Livro removido do acervo.' });
   } catch (error) {
     console.error("Erro no controller ao deletar livro:", error);

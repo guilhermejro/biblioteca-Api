@@ -15,11 +15,11 @@ const BASE_SELECT = `
 `;
 
 // Marca empréstimos vencidos automaticamente
-function updateOverdue() {
+async function updateOverdue() {
   const today = new Date().toISOString().split('T')[0];
-  db.run(
+  await db.run(
     `UPDATE loans SET status = 'overdue'
-     WHERE status = 'active' AND due_date < ?`,
+     WHERE status = 'active' AND due_date < $1`,
     [today]
   );
 }
@@ -32,135 +32,140 @@ function calcDueDate(days = 14) {
 }
 
 const Loan = {
-  // Listar com filtros
-findAll({ role, userId, status, member_id, book_id, page, limit } = {}) {
-    updateOverdue();
+  // Listar com filtros e paginação
+  async findAll({ role, userId, status, member_id, book_id, page, limit } = {}) {
+    await updateOverdue();
 
     const params = [];
     let where = 'WHERE 1=1';
 
     if (role === 'member') {
-      where += ' AND l.member_id = ?';
       params.push(userId);
+      where += ` AND l.member_id = $${params.length}`;
     } else if (member_id) {
-      where += ' AND l.member_id = ?';
       params.push(member_id);
+      where += ` AND l.member_id = $${params.length}`;
     }
 
     if (book_id) {
-      where += ' AND l.book_id = ?';
       params.push(book_id);
+      where += ` AND l.book_id = $${params.length}`;
     }
 
     if (status) {
-      where += ' AND l.status = ?';
       params.push(status);
+      where += ` AND l.status = $${params.length}`;
     }
 
     let query = `${BASE_SELECT} ${where} ORDER BY l.loaned_at DESC`;
 
-    // 🔥 SOLUÇÃO DEFINITIVA PARA O SQLITE: Injetar os números direto na Query string
     if (page && limit) {
       const parsedLimit = Number(limit);
-      const parsedOffset = (Number(page) - 1) * parsedLimit; 
-      
-      // Concatenamos diretamente os valores limpos e validados para evitar o bug do driver SQL
-      query += ` LIMIT ${parsedLimit} OFFSET ${parsedOffset}`;
+      const parsedOffset = (Number(page) - 1) * parsedLimit;
+
+      params.push(parsedLimit);
+      query += ` LIMIT $${params.length}`;
+
+      params.push(parsedOffset);
+      query += ` OFFSET $${params.length}`;
     }
 
-    return db.query(query, params);
+    return await db.query(query, params);
   },
+
+  // Contador totalizador para controle de paginação
   async count({ role, userId, status, member_id, book_id } = {}) {
     const params = [];
     let where = 'WHERE 1=1';
 
     if (role === 'member') {
-      where += ' AND member_id = ?';
       params.push(userId);
+      where += ` AND member_id = $${params.length}`;
     } else if (member_id) {
-      where += ' AND member_id = ?';
       params.push(member_id);
+      where += ` AND member_id = $${params.length}`;
     }
 
     if (book_id) {
-      where += ' AND book_id = ?';
       params.push(book_id);
+      where += ` AND book_id = $${params.length}`;
     }
 
     if (status) {
-      where += ' AND status = ?';
       params.push(status);
+      where += ` AND status = $${params.length}`;
     }
 
-    // Faz uma query rápida apenas contando os registros filtrados
     const result = await db.get(`SELECT COUNT(*) AS total FROM loans ${where}`, params);
-    return result ? result.total : 0;
+    return result ? parseInt(result.total, 10) : 0;
   },
 
   // Buscar por ID
-  findById(id) {
-    updateOverdue();
-    return db.get(`${BASE_SELECT} WHERE l.id = ?`, [id]);
+  async findById(id) {
+    await updateOverdue();
+    return await db.get(`${BASE_SELECT} WHERE l.id = $1`, [id]);
   },
 
   // Verificar se membro já tem esse livro emprestado ou reservado
-  findActive(bookId, memberId) {
-    return db.get(
-      "SELECT id FROM loans WHERE book_id = ? AND member_id = ? AND status IN ('active','overdue','pending')",
+  async findActive(bookId, memberId) {
+    return await db.get(
+      "SELECT id FROM loans WHERE book_id = $1 AND member_id = $2 AND status IN ('active','overdue','pending')",
       [bookId, memberId]
     );
   },
 
-  // ⚠️ NOVA FUNÇÃO: Verifica se o membro tem QUALQUER livro atrasado no sistema
-  findOverdueByMember(memberId) {
-    updateOverdue(); // Roda o pente fino antes de checar para garantir o dado em tempo real
-    return db.get(
-      "SELECT id FROM loans WHERE member_id = ? AND status = 'overdue' LIMIT 1",
+  // Verifica se o membro tem livros atrasados
+  async findOverdueByMember(memberId) {
+    await updateOverdue();
+    return await db.get(
+      "SELECT id FROM loans WHERE member_id = $1 AND status = 'overdue' LIMIT 1",
       [memberId]
     );
   },
 
   // Listar vencidos
-  findOverdue() {
-    updateOverdue();
-    return db.query(
+  async findOverdue() {
+    await updateOverdue();
+    return await db.query(
       `${BASE_SELECT} WHERE l.status = 'overdue' ORDER BY l.due_date ASC`,
       []
     );
   },
 
   // Criar empréstimo
-  create({ book_id, member_id, librarian_id, due_days, status }) {
+  async create({ book_id, member_id, librarian_id, due_days, status }) {
     const due_date = calcDueDate(Number(due_days ?? 14));
     const initialStatus = status || 'active';
 
-    const result = db.run(
+    const result = await db.run(
       `INSERT INTO loans (book_id, member_id, librarian_id, due_date, status)
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
       [book_id, member_id, librarian_id, due_date, initialStatus]
     );
-    return Loan.findById(result.lastInsertRowid);
+
+    const insertedId = result.rows ? result.rows[0].id : result.lastInsertRowid;
+    return await Loan.findById(insertedId);
   },
 
   // Atualizar status e bibliotecário
-  updateStatusAndLibrarian(id, status, librarian_id) {
-    db.run(
+  async updateStatusAndLibrarian(id, status, librarian_id) {
+    await db.run(
       `UPDATE loans 
-       SET status = ?, librarian_id = ? 
-       WHERE id = ?`,
+       SET status = $1, librarian_id = $2 
+       WHERE id = $3`,
       [status, librarian_id, id]
     );
-    return this.findById(id);
+    return await this.findById(id);
   },
 
   // Registrar devolução
-  return(id) {
-    const now = new Date().toISOString().replace('T', ' ').split('.')[0];
-    db.run(
-      "UPDATE loans SET status = 'returned', returned_at = ? WHERE id = ?",
+  async return(id) {
+    const now = new Date().toISOString();
+    await db.run(
+      "UPDATE loans SET status = 'returned', returned_at = $1 WHERE id = $2",
       [now, id]
     );
-    return Loan.findById(id);
+    return await Loan.findById(id);
   },
 };
 

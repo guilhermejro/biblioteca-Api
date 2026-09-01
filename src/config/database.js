@@ -1,125 +1,101 @@
-const initSqlJs = require('sql.js');
-const fs        = require('fs');
-const path      = require('path');
+const { Pool } = require('pg');
 
-const DB_PATH = path.resolve(process.env.DB_PATH || './database.sqlite');
-
-let db; // instância global
-
-// ── Persiste o banco em disco ─────────────────────────────────────────────────
-function saveDb() {
-  const data = db.export();
-  fs.writeFileSync(DB_PATH, Buffer.from(data));
-}
+// Configuração do pool de conexões (lê do .env ou usa string/dados padrão)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  // Caso não use DATABASE_URL, você pode configurar individualmente:
+  // host: process.env.DB_HOST || 'localhost',
+  // port: process.env.DB_PORT || 5432,
+  // user: process.env.DB_USER || 'postgres',
+  // password: process.env.DB_PASSWORD || 'postgres',
+  // database: process.env.DB_NAME || 'library_db',
+  // ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
 // ── Helper: executa SELECT e retorna array de objetos ─────────────────────────
-function query(sql, params = []) {
-  const stmt   = db.prepare(sql);
-  const rows   = [];
-  
-  // 🔥 CORREÇÃO: Converte strings numéricas em números reais antes do bind
-  // Isso impede que o sql.js quebre as cláusulas LIMIT e OFFSET
-  const sanitizedParams = params.map(param => {
-    if (typeof param === 'string' && !isNaN(param) && trim(param) !== '') {
-      return Number(param);
-    }
-    return param;
-  });
-
-  // Função auxiliar simples para limpar espaços caso use string antiga
-  function trim(str) { return str.replace(/^\s+|\s+$/g, ''); }
-
-  stmt.bind(sanitizedParams); // Usa os parâmetros higienizados
-  
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
+async function query(sql, params = []) {
+  const result = await pool.query(sql, params);
+  return result.rows;
 }
 
 // ── Helper: executa INSERT / UPDATE / DELETE ──────────────────────────────────
-function run(sql, params = []) {
-  const stmt = db.prepare(sql);
+async function run(sql, params = []) {
+  // Para retornar o ID inserido no Postgres, certifique-se de adicionar 'RETURNING id' no final do INSERT
+  const result = await pool.query(sql, params);
 
-  // CORREÇÃO AQUI: Vincula os parâmetros corretamente antes de rodar
-  stmt.bind(params); 
-  stmt.run();
-
-  const result = {
-    lastInsertRowid: db.exec(
-      'SELECT last_insert_rowid() AS id'
-    )[0].values[0][0]
+  return {
+    rowCount: result.rowCount,
+    lastInsertRowid: result.rows[0]?.id || null
   };
-
-  stmt.free();
-
-  saveDb();
-
-  return result;
 }
+
 // ── Helper: retorna um único registro ─────────────────────────────────────────
-function get(sql, params = []) {
-  const rows = query(sql, params);
+async function get(sql, params = []) {
+  const rows = await query(sql, params);
   return rows[0] || null;
 }
 
 // ── Cria as tabelas se não existirem ─────────────────────────────────────────
-function createTables() {
-  db.run(`
+async function createTables() {
+  const queryText = `
     CREATE TABLE IF NOT EXISTS users (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      name       TEXT    NOT NULL,
-      email      TEXT    NOT NULL UNIQUE,
-      password   TEXT    NOT NULL,
-      role       TEXT    NOT NULL DEFAULT 'member',   -- 'librarian' | 'member'
-      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    )
-  `);
+      id         SERIAL PRIMARY KEY,
+      name       VARCHAR(255) NOT NULL,
+      email      VARCHAR(255) NOT NULL UNIQUE,
+      password   VARCHAR(255) NOT NULL,
+      role       VARCHAR(50)  NOT NULL DEFAULT 'member',   -- 'librarian' | 'member'
+      created_at TIMESTAMP    NOT NULL DEFAULT NOW()
+    );
 
-  db.run(`
     CREATE TABLE IF NOT EXISTS books (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      title         TEXT    NOT NULL,
-      author        TEXT    NOT NULL,
-      isbn          TEXT    UNIQUE,
-      publisher     TEXT,
+      id            SERIAL PRIMARY KEY,
+      title         VARCHAR(255) NOT NULL,
+      author        VARCHAR(255) NOT NULL,
+      isbn          VARCHAR(100) UNIQUE,
+      publisher     VARCHAR(255),
       year          INTEGER,
       description   TEXT, 
       image_url     TEXT,
-      total_copies  INTEGER NOT NULL DEFAULT 1,
-      available     INTEGER NOT NULL DEFAULT 1,
-      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
-    )
-  `);
+      total_copies  INTEGER      NOT NULL DEFAULT 1,
+      available     INTEGER      NOT NULL DEFAULT 1,
+      created_at    TIMESTAMP    NOT NULL DEFAULT NOW()
+    );
 
-  db.run(`
     CREATE TABLE IF NOT EXISTS loans (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      book_id       INTEGER NOT NULL REFERENCES books(id),
-      member_id     INTEGER NOT NULL REFERENCES users(id),
-      librarian_id  INTEGER NOT NULL REFERENCES users(id),
-      loaned_at     TEXT    NOT NULL DEFAULT (datetime('now')),
-      due_date      TEXT    NOT NULL,
-      returned_at   TEXT,
-      status        TEXT    NOT NULL DEFAULT 'active'   -- 'active' | 'returned' | 'overdue'
-    )
-  `);
+      id            SERIAL PRIMARY KEY,
+      book_id       INTEGER      NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+      member_id     INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      librarian_id  INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      loaned_at     TIMESTAMP    NOT NULL DEFAULT NOW(),
+      due_date      TIMESTAMP    NOT NULL,
+      returned_at   TIMESTAMP,
+      status        VARCHAR(50)  NOT NULL DEFAULT 'active'   -- 'active' | 'returned' | 'overdue'
+    );
+  `;
 
-  saveDb();
-}
-
-// ── Inicializa o banco (carrega do disco ou cria novo) ────────────────────────
-async function initDb() {
-  const SQL = await initSqlJs();
-
-  if (fs.existsSync(DB_PATH)) {
-    const fileBuffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(fileBuffer);
-  } else {
-    db = new SQL.Database();
+  try {
+    await pool.query(queryText);
+    console.log('✅ Tabelas verificadas/criadas no PostgreSQL.');
+  } catch (error) {
+    console.error('❌ Erro ao criar tabelas no PostgreSQL:', error);
   }
-
-  createTables();
-  console.log(`✅  Banco de dados pronto: ${DB_PATH}`);
 }
 
-module.exports = { initDb, query, run, get, saveDb };
+// ── Inicializa a conexão e cria as tabelas ────────────────────────────────────
+async function initDb() {
+  try {
+    await pool.query('SELECT NOW()'); // Testa a conexão com o banco
+    await createTables();
+    console.log('✅ Conexão com o PostgreSQL estabelecida com sucesso.');
+  } catch (error) {
+    console.error('❌ Erro ao conectar ao PostgreSQL:', error);
+    process.exit(1);
+  }
+}
+
+// Mantido por compatibilidade (não é necessário no Postgres)
+function saveDb() {
+  // As alterações no Postgres são salvas instantaneamente em disco
+}
+
+module.exports = { initDb, query, run, get, saveDb, pool };

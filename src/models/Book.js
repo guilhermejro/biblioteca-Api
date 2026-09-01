@@ -1,69 +1,70 @@
 const db = require('../config/database');
 
 const Book = {
-  // Listar com filtros opcionais e paginação síncrona
- findAll({ page = 1, limit = 50, search = '' } = {}) {
-    // 1. Força a conversão para inteiros puros no escopo do JavaScript
+  // Listar com filtros opcionais e paginação assíncrona
+  async findAll({ page = 1, limit = 50, search = '' } = {}) {
     const numPage = parseInt(page, 10) || 1;
     const numLimit = parseInt(limit, 10) || 50;
     const offset = (numPage - 1) * numLimit;
 
-    // 2. PRIMEIRA CONSULTA: Contar o total de registros
+    // 1. PRIMEIRA CONSULTA: Contar o total de registros
     let countSql = 'SELECT COUNT(*) as total FROM books WHERE 1=1';
     const countParams = [];
 
     if (search) {
-      countSql += ' AND (title LIKE ? OR author LIKE ?)';
+      countSql += ' AND (title ILIKE $1 OR author ILIKE $2)';
       countParams.push(`%${search}%`, `%${search}%`);
     }
 
-    const totalRow = db.get(countSql, countParams);
-    const totalItems = totalRow ? totalRow.total : 0;
-    const totalPages = Math.ceil(totalItems / numLimit);
+    const totalRow = await db.get(countSql, countParams);
+    const totalItems = totalRow ? parseInt(totalRow.total, 10) : 0;
+    const totalPages = Math.ceil(totalItems / numLimit) || 1;
 
-    // 3. SEGUNDA CONSULTA: Buscar os dados limitados
+    // 2. SEGUNDA CONSULTA: Buscar os dados limitados
     let sql = 'SELECT * FROM books WHERE 1=1';
     const selectParams = [];
 
     if (search) {
-      sql += ' AND (title LIKE ? OR author LIKE ?)';
+      sql += ' AND (title ILIKE $1 OR author ILIKE $2)';
       selectParams.push(`%${search}%`, `%${search}%`);
     }
 
     sql += ' ORDER BY title ASC';
 
-    // 🔥 AQUI ESTÁ A MUDANÇA: Injetamos os números direto na string do SQL!
-    // Como numLimit e offset foram processados por parseInt(), isso é 100% seguro contra SQL Injection.
-    sql += ` LIMIT ${numLimit} OFFSET ${offset}`;
+    // No Postgres, podemos passar LIMIT e OFFSET via parâmetros sanitizados ($1, $2)
+    const limitIndex = selectParams.length + 1;
+    const offsetIndex = selectParams.length + 2;
+    sql += ` LIMIT $${limitIndex} OFFSET $${offsetIndex}`;
+    selectParams.push(numLimit, offset);
 
-    // Executa a busca passando apenas os parâmetros do 'search' (se houver)
-    const books = db.query(sql, selectParams);
+    const books = await db.query(sql, selectParams);
 
-    // 4. Retorna a estrutura exata que o React precisa
+    // 3. Retorna a estrutura para a paginação do React
     return {
       books: books || [],
-      totalPages: totalPages || 1,
+      totalPages,
       currentPage: numPage,
       totalItems
     };
   },
 
   // Buscar por ID
-  findById(id) {
-    return db.get('SELECT * FROM books WHERE id = ?', [id]);
+  async findById(id) {
+    return await db.get('SELECT * FROM books WHERE id = $1', [id]);
   },
 
   // Buscar por ISBN
-  findByIsbn(isbn) {
-    return db.get('SELECT id FROM books WHERE isbn = ?', [isbn]);
+  async findByIsbn(isbn) {
+    return await db.get('SELECT id FROM books WHERE isbn = $1', [isbn]);
   },
 
-  // Criar novo livro (com descrição)
-  create({ title, author, isbn, publisher, year, total_copies, image_url, description }) {
+  // Criar novo livro (retorna o registro direto via RETURNING *)
+  async create({ title, author, isbn, publisher, year, total_copies, image_url, description }) {
     const copies = Number(total_copies) || 1;
-    const result = db.run(
+    const result = await db.run(
       `INSERT INTO books (title, author, isbn, publisher, year, total_copies, available, image_url, description)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
       [
         title,
         author,
@@ -77,14 +78,13 @@ const Book = {
       ]
     );
 
-    console.log(result);
-
-    return db.get('SELECT * FROM books WHERE id = ?', [result.lastInsertRowid]);
+    // Caso a camada db.run devolva as linhas diretamente
+    return result.rows ? result.rows[0] : await Book.findById(result.lastInsertRowid);
   },
 
-  // Atualizar dados do livro (com descrição e imagem)
-  update(id, fields) {
-    const book = Book.findById(id);
+  // Atualizar dados do livro
+  async update(id, fields) {
+    const book = await Book.findById(id);
     if (!book) return null;
 
     const newTitle = fields.title ?? book.title;
@@ -99,10 +99,10 @@ const Book = {
     const diff = newTotal - book.total_copies;
     const newAvail = Math.max(0, book.available + diff);
 
-    db.run(
+    await db.run(
       `UPDATE books
-       SET title=?, author=?, isbn=?, publisher=?, year=?, total_copies=?, available=?, description=?, image_url=?
-       WHERE id=?`,
+       SET title=$1, author=$2, isbn=$3, publisher=$4, year=$5, total_copies=$6, available=$7, description=$8, image_url=$9
+       WHERE id=$10`,
       [
         newTitle,
         newAuthor,
@@ -117,24 +117,24 @@ const Book = {
       ]
     );
 
-    return Book.findById(id);
+    return await Book.findById(id);
   },
 
   // Deletar do acervo
-  delete(id) {
-    db.run('DELETE FROM books WHERE id = ?', [id]);
+  async delete(id) {
+    await db.run('DELETE FROM books WHERE id = $1', [id]);
   },
 
-  decrementAvailable(id) {
-    db.run('UPDATE books SET available = available - 1 WHERE id = ?', [id]);
+  async decrementAvailable(id) {
+    await db.run('UPDATE books SET available = available - 1 WHERE id = $1', [id]);
   },
 
-  incrementAvailable(id) {
-    db.run('UPDATE books SET available = available + 1 WHERE id = ?', [id]);
+  async incrementAvailable(id) {
+    await db.run('UPDATE books SET available = available + 1 WHERE id = $1', [id]);
   },
 
-  hasActiveLoans(id) {
-    return db.get("SELECT id FROM loans WHERE book_id = ? AND status = 'active'", [id]);
+  async hasActiveLoans(id) {
+    return await db.get("SELECT id FROM loans WHERE book_id = $1 AND status = 'active'", [id]);
   },
 };
 

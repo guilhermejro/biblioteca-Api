@@ -25,7 +25,8 @@ async function createLoan(req, res) {
       return res.status(404).json({ error: 'Membro não encontrado.' });
     }
 
-    if (Loan.findOverdueByMember && await Loan.findOverdueByMember(member_id)) {
+    // AJUSTE: Garante await caso a verificação de atraso consulte o PostgreSQL
+    if (Loan.findOverdueByMember && (await Loan.findOverdueByMember(member_id))) {
       return res.status(400).json({
         error: 'Empréstimo/Reserva negado. Este leitor possui pendências de livros atrasados no sistema.'
       });
@@ -135,14 +136,11 @@ async function returnLoan(req, res) {
 // ── GET /loans ────────────────────────────────────────────────────────────────
 async function listLoans(req, res) {
   try {
-    // 1. Força o limite padrão para 5 itens para alinhar com a paginação do Front
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 5;
 
-    // 2. O Model Loan.js usa o page e o limit internos para calcular o OFFSET da query SQL
     const { page: _p, limit: _l, ...filters } = req.query;
 
-    // 3. 🔥 ADICIONADO AWAIT: Aguarda o SQLite buscar os registros limitados da página
     const loans = await Loan.findAll({
       role: req.user.role,
       userId: req.user.id,
@@ -151,7 +149,6 @@ async function listLoans(req, res) {
       ...filters,
     });
 
-    // 4. 🔥 RESOLUÇÃO ASSÍNCRONA EM PARALELO: Mapeia e enriquece os itens com await seguro
     const enrichedLoans = await Promise.all(loans.map(async (loan) => {
       const bookData = await Book.findById(loan.book_id);
       const userData = await User.findById(loan.member_id);
@@ -174,16 +171,13 @@ async function listLoans(req, res) {
       };
     }));
 
-    // 5. 🔥 CONTADOR TOTAL ASSÍNCRONO: Puxa a contagem de registros totais sem o limite de paginação
     let totalLoansNoBanco = 0;
     if (Loan.count) {
       totalLoansNoBanco = await Loan.count({ role: req.user.role, userId: req.user.id, ...filters });
     } else {
-      // Fallback caso a função count falhe por algum motivo
       totalLoansNoBanco = enrichedLoans.length;
     }
 
-    // 6. Resposta estruturada para que o front-end consiga gerenciar o estado dos botões
     return res.json({
       page,
       limit,
